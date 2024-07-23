@@ -1,0 +1,10 @@
+.icon {
+    display: inline-block;
+    background-size: contain;
+
+    &.icon-power-off-white {
+        background: url(../images/icons/icon-power-off-white.svg);
+        width: 16px;
+        height: 12px;
+    }
+}

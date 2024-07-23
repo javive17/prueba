@@ -1,0 +1,2 @@
+- crear config para los segundos en que se va a refrescar la pantalla
+- crear config para los segundos en que se va a impedir registrar la lectura de los tickets consecutivamente
