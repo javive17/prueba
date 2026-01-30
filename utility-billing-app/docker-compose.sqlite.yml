@@ -1,0 +1,22 @@
+version: '3.8'
+
+# Simpler setup using SQLite instead of PostgreSQL
+# Use this for small deployments or testing
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - sqlite_data:/app/data
+    environment:
+      - DATABASE_URL=file:/app/data/utility_billing.db
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-change-this-secret-in-production}
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
+    restart: unless-stopped
+
+volumes:
+  sqlite_data:
