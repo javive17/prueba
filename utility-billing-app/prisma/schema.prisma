@@ -1,0 +1,388 @@
+// Prisma schema for Utility Billing & Property Management System
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// User & Authentication
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  password      String
+  role          String    @default("user") // admin, manager, user
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+// Customer/Tenant Management
+model Customer {
+  id              String    @id @default(cuid())
+  customerName    String
+  customerType    String    @default("Individual") // Individual, Company
+  email           String?
+  phone           String?
+  address         String?
+  territory       String?
+  status          String    @default("Active") // Active, Inactive
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  properties      PropertyCustomer[]
+  meterReadings   MeterReading[]
+  serviceRequests ServiceRequest[]
+  invoices        Invoice[]
+  contracts       Contract[]
+}
+
+// Property Management - Hierarchical
+model Property {
+  id              String    @id @default(cuid())
+  name            String
+  propertyType    String    // Project, Building, Floor, Unit
+  parentId        String?
+  parent          Property? @relation("PropertyHierarchy", fields: [parentId], references: [id])
+  children        Property[] @relation("PropertyHierarchy")
+
+  address         String?
+  area            Float?
+  areaUnit        String?   @default("sqft")
+  unitType        String?   // Studio, 1BR, 2BR, 3BR, Commercial, etc.
+  status          String    @default("Available") // Available, Occupied, Maintenance, Reserved
+
+  monthlyRent     Float?
+  depositAmount   Float?
+
+  features        PropertyFeature[]
+  customers       PropertyCustomer[]
+  meterReadings   MeterReading[]
+  serviceRequests ServiceRequestProperty[]
+  contracts       ContractProperty[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// Property Features
+model PropertyFeature {
+  id          String    @id @default(cuid())
+  propertyId  String
+  property    Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  featureName String
+  featureType String    // Amenity, Utility, Appliance, etc.
+  value       String?
+}
+
+// Property-Customer Link
+model PropertyCustomer {
+  id          String    @id @default(cuid())
+  propertyId  String
+  property    Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  startDate   DateTime
+  endDate     DateTime?
+  status      String    @default("Active") // Active, Ended
+}
+
+// Utility Categories
+model UtilityCategory {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  parentId    String?
+  parent      UtilityCategory? @relation("UtilityCategoryHierarchy", fields: [parentId], references: [id])
+  children    UtilityCategory[] @relation("UtilityCategoryHierarchy")
+
+  utilityItems UtilityItem[]
+}
+
+// Utility Items (Water, Electricity, Gas, etc.)
+model UtilityItem {
+  id              String    @id @default(cuid())
+  itemCode        String    @unique
+  itemName        String
+  categoryId      String?
+  category        UtilityCategory? @relation(fields: [categoryId], references: [id])
+  unit            String    // kWh, Gallons, Cubic Meters, etc.
+  baseRate        Float
+
+  tariffBlocks    TariffBlock[]
+  meterReadingItems MeterReadingItem[]
+  invoiceItems    InvoiceItem[]
+  billStructureItems BillStructureItem[]
+}
+
+// Tariff Blocks for Progressive Pricing
+model TariffBlock {
+  id              String    @id @default(cuid())
+  utilityItemId   String
+  utilityItem     UtilityItem @relation(fields: [utilityItemId], references: [id], onDelete: Cascade)
+  fromUnit        Float
+  toUnit          Float?    // null means unlimited
+  rate            Float
+  description     String?
+}
+
+// Meter Reading
+model MeterReading {
+  id              String    @id @default(cuid())
+  readingNumber   String    @unique
+  customerId      String
+  customer        Customer  @relation(fields: [customerId], references: [id])
+  propertyId      String?
+  property        Property? @relation(fields: [propertyId], references: [id])
+  readingDate     DateTime
+  status          String    @default("Draft") // Draft, Submitted, Billed
+  totalAmount     Float     @default(0)
+
+  items           MeterReadingItem[]
+  invoices        Invoice[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// Meter Reading Items
+model MeterReadingItem {
+  id              String    @id @default(cuid())
+  meterReadingId  String
+  meterReading    MeterReading @relation(fields: [meterReadingId], references: [id], onDelete: Cascade)
+  utilityItemId   String
+  utilityItem     UtilityItem @relation(fields: [utilityItemId], references: [id])
+  meterNumber     String
+  previousReading Float
+  currentReading  Float
+  consumption     Float
+  rate            Float
+  amount          Float
+}
+
+// Bill Structure Templates
+model BillStructure {
+  id              String    @id @default(cuid())
+  name            String    @unique
+  description     String?
+  fiscalYear      String?
+  isActive        Boolean   @default(true)
+
+  items           BillStructureItem[]
+  serviceRequests ServiceRequest[]
+}
+
+// Bill Structure Items
+model BillStructureItem {
+  id              String    @id @default(cuid())
+  billStructureId String
+  billStructure   BillStructure @relation(fields: [billStructureId], references: [id], onDelete: Cascade)
+  utilityItemId   String
+  utilityItem     UtilityItem @relation(fields: [utilityItemId], references: [id])
+  quantity        Float     @default(1)
+  rate            Float?
+  description     String?
+}
+
+// Billing Adjustment Rules
+model BillingAdjustmentRule {
+  id                    String    @id @default(cuid())
+  ruleName              String    @unique
+  description           String?
+
+  // Penalty Settings
+  penaltyType           String?   // Fixed, Percentage
+  penaltyValue          Float?
+  gracePeriodDays       Int       @default(0)
+  penaltyFrequency      String?   // Once, Monthly, Daily
+  isCompounding         Boolean   @default(false)
+  penaltyCap            Float?
+
+  // Increment Settings
+  incrementIntervalMonths Int?
+  incrementPercentage   Float?
+  effectiveAfterMonths  Int?
+
+  isActive              Boolean   @default(true)
+
+  contracts             Contract[]
+  serviceRequestProperties ServiceRequestProperty[]
+}
+
+// Service Requests
+model ServiceRequest {
+  id                String    @id @default(cuid())
+  requestNumber     String    @unique
+  customerId        String?
+  customer          Customer? @relation(fields: [customerId], references: [id])
+  customerName      String?
+  customerEmail     String?
+  customerPhone     String?
+
+  requestType       String    // New Connection, Rental, Service Change, Disconnection
+  status            String    @default("Draft") // Draft, Site Survey, BOM, Billing, Completed, Cancelled
+
+  billStructureId   String?
+  billStructure     BillStructure? @relation(fields: [billStructureId], references: [id])
+
+  startDate         DateTime?
+  endDate           DateTime?
+  contractMonths    Int?
+
+  billingStatus     String    @default("Not Billed") // Not Billed, Partly Billed, Fully Billed
+  totalAmount       Float     @default(0)
+  billedAmount      Float     @default(0)
+
+  notes             String?
+
+  properties        ServiceRequestProperty[]
+  items             ServiceRequestItem[]
+  contracts         Contract[]
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+// Service Request Properties
+model ServiceRequestProperty {
+  id                  String    @id @default(cuid())
+  serviceRequestId    String
+  serviceRequest      ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  propertyId          String
+  property            Property @relation(fields: [propertyId], references: [id])
+
+  adjustmentRuleId    String?
+  adjustmentRule      BillingAdjustmentRule? @relation(fields: [adjustmentRuleId], references: [id])
+
+  startDate           DateTime?
+  endDate             DateTime?
+}
+
+// Service Request Items
+model ServiceRequestItem {
+  id                String    @id @default(cuid())
+  serviceRequestId  String
+  serviceRequest    ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  itemDescription   String
+  quantity          Float     @default(1)
+  rate              Float
+  amount            Float
+}
+
+// Contracts
+model Contract {
+  id                  String    @id @default(cuid())
+  contractNumber      String    @unique
+  customerId          String
+  customer            Customer  @relation(fields: [customerId], references: [id])
+  serviceRequestId    String?
+  serviceRequest      ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
+
+  adjustmentRuleId    String?
+  adjustmentRule      BillingAdjustmentRule? @relation(fields: [adjustmentRuleId], references: [id])
+
+  startDate           DateTime
+  endDate             DateTime
+  status              String    @default("Active") // Active, Expired, Terminated
+
+  monthlyRent         Float?
+  depositAmount       Float?
+
+  termsAndConditions  String?
+
+  properties          ContractProperty[]
+  invoices            Invoice[]
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+}
+
+// Contract Properties
+model ContractProperty {
+  id          String    @id @default(cuid())
+  contractId  String
+  contract    Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  propertyId  String
+  property    Property  @relation(fields: [propertyId], references: [id])
+  startDate   DateTime?
+  endDate     DateTime?
+}
+
+// Invoices
+model Invoice {
+  id              String    @id @default(cuid())
+  invoiceNumber   String    @unique
+  customerId      String
+  customer        Customer  @relation(fields: [customerId], references: [id])
+  contractId      String?
+  contract        Contract? @relation(fields: [contractId], references: [id])
+  meterReadingId  String?
+  meterReading    MeterReading? @relation(fields: [meterReadingId], references: [id])
+
+  invoiceType     String    @default("Standard") // Standard, Penalty, Adjustment
+  invoiceDate     DateTime
+  dueDate         DateTime
+  status          String    @default("Draft") // Draft, Submitted, Paid, Overdue, Cancelled
+
+  subtotal        Float     @default(0)
+  taxAmount       Float     @default(0)
+  totalAmount     Float     @default(0)
+  paidAmount      Float     @default(0)
+
+  items           InvoiceItem[]
+  payments        Payment[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// Invoice Items
+model InvoiceItem {
+  id              String    @id @default(cuid())
+  invoiceId       String
+  invoice         Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  utilityItemId   String?
+  utilityItem     UtilityItem? @relation(fields: [utilityItemId], references: [id])
+  description     String
+  quantity        Float     @default(1)
+  rate            Float
+  amount          Float
+}
+
+// Payments
+model Payment {
+  id              String    @id @default(cuid())
+  paymentNumber   String    @unique
+  invoiceId       String
+  invoice         Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  paymentDate     DateTime
+  amount          Float
+  paymentMethod   String    // Cash, Bank Transfer, Card, Check
+  reference       String?
+  notes           String?
+
+  createdAt       DateTime  @default(now())
+}
+
+// Settings
+model Settings {
+  id                      String    @id @default(cuid())
+  companyName             String    @default("Utility Billing Co.")
+  companyAddress          String?
+  companyPhone            String?
+  companyEmail            String?
+
+  defaultCurrency         String    @default("USD")
+  taxRate                 Float     @default(0)
+
+  requireDeposit          Boolean   @default(true)
+  requireSiteSurvey       Boolean   @default(false)
+  autoGenerateInvoice     Boolean   @default(true)
+
+  paymentTermsDays        Int       @default(30)
+
+  updatedAt               DateTime  @updatedAt
+}
